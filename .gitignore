@@ -1,6 +1,13 @@
-# Office temporary files
+﻿# Office temporary files
 ~$*
 *.tmp
+
+# MATLAB autosave / build artefacts
+*.asv
+*.m~
+slprj/
+*.slxc
+*.autosave
 
 # OS
 Thumbs.db

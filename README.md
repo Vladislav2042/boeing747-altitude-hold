@@ -1,112 +1,148 @@
-# Boeing 747 Altitude-Hold Controller — from PID to LQI
+# Boeing 747 Altitude-Hold Controller — PID Design (Part C)
 
-Course project for **Principles of Automatic Control** (SJTU), Part C: design a longitudinal control
-system that holds the altitude of a Boeing 747, simulate it in MATLAB/Simulink, and analyse stability
-and performance.
+Group course project for **Principles of Automatic Control** (SJTU). Part C asks for an altitude-hold
+controller on the longitudinal channel of a Boeing 747, simulated in MATLAB, with a stability and
+performance analysis.
 
-The engineering story is a progression, not a single design: a PID that technically works but is
-uselessly slow, then a standard LQR that is fast but leaves a steady-state error, then an **LQI**
-controller — the LQR augmented with an integrator state — which is the first design that satisfies
-both requirements at once.
+**My part — the report and both MATLAB scripts in this repository:** the PID controller design, the
+MATLAB implementation, the closed-loop pole and stability-margin analysis, and the comparison between
+the two tuning iterations. The rest of the group project (the Part A model, the Part B yaw damper, the
+Part D robustness study) is the work of the other group members.
 
-This repository contains the technical report (`.docx` and `.pdf`). The models and simulations live in
-MATLAB and were not part of the submission archive, so no source code is published here.
+## The plant
 
-## Scope of contribution
+Fifth-order longitudinal model of the 747 taken from Part A, with elevator deflection `δₑ` as the input
+and altitude `h` as the output:
 
-Part C of a **group** course project (Group 3). My part was the control engineering itself: evaluating
-the PID baseline, then the LQR, then designing and tuning the LQI controller — the weighting matrices,
-gains, simulations, pole analysis and the comparison table below are the result of that work. The
-written report was assembled within the group from these results, and is published here with personal
-identifiers (name, student number) removed.
-
-## The problem
-
-From Part A of the project, the longitudinal dynamics of the Boeing 747 give a **fourth-order**
-state-space model and a transfer function from elevator deflection `δₑ` to altitude `h`. The open-loop
-plant is **unstable**, which rules out simple lead–lag compensation: cascade compensation on an
-unstable plant cannot relocate the right-half-plane pole reliably, so a feedback controller with a
-clear stability argument is required instead.
-
-Task, as stated in the assignment:
-
-1. design a longitudinal control system for altitude hold;
-2. simulate it in MATLAB/Simulink;
-3. analyse stability and performance.
-
-## Design path
-
-### 1. PID — stable, but too slow
-
-A PID controller was tuned with the MATLAB **PID Tuner** (automatic optimisation). The closed loop is
-stable and the steady-state error is small, but the settling time comes out around **2100 s** — half an
-hour to settle is not a controller, it is a suggestion. The reason is structural: the plant's slow
-mode dominates, and a single-loop PID has no way to address the multi-state dynamics directly.
-
-### 2. Standard LQR — fast, but no integral action
-
-State feedback with LQR weights produced a fast transient, but zero steady-state error is only
-guaranteed for the nominal model. Any constant disturbance or model offset leaves a residual altitude
-error, because the controller has no memory of accumulated error.
-
-### 3. LQI — the design that works
-
-The plant is augmented with an **integrator state** on the altitude error, and LQR is solved on the
-augmented system. The weighting matrices that were settled on after iterative tuning:
-
-```
-Q_aug = diag([0.01, 0.1, 1, 10, 50])
-R_aug = 50
+```matlab
+A = [-0.00643   0.0263    0      -32.2    0;
+     -0.0941   -0.624   820       0      0;
+     -0.000222 -0.00153 -0.668    0      0;
+      0         0        1        0      0;
+      0        -1        0       830     0];
+B = [0; -32.7; -2.08; 0; 0];
+C = [0 0 0 0 1];
+D = 0;
 ```
 
-The largest weight, `50`, sits on the **integral error state**: that is what forces zero steady-state
-altitude error. The physical states carry smaller weights, trading a little transient aggressiveness
-for smooth elevator activity.
+What the open-loop analysis (computed, not quoted) says about it:
 
-Resulting gains (MATLAB, `lqr` on the augmented system):
+| Property | Value | Consequence |
+|---|---|---|
+| Eigenvalues of `A` | `0`, `-0.6463 ± 1.1211i`, `-0.0030 ± 0.0098i` | **Marginally stable**, not unstable: the pole at the origin is the altitude channel with nothing holding it |
+| Zeros of `h(s)/δₑ(s)` | `-5.6449`, **`+5.6111`**, `-0.0045` | A **right-half-plane zero** — the plant is non-minimum phase |
+| Phugoid pair | `-0.0030 ± 0.0098i` (ζ ≈ 0.29) | almost undamped, very slow |
+| Transfer function | `(32.7 s³ + 1.3 s² − 1035.7 s − 4.7) / (s⁵ + 1.2984 s⁴ + 1.6822 s³ + 0.01 s² + 0.0002 s)` | — |
 
-```
-K  = [-0.0158,  0.5216,  -16.4488,  -519.9373]
-Ki = 1.0000
-```
+Two consequences drive the whole design:
+
+1. **The pole at the origin** means a steady elevator input produces a ramp in altitude, not a new
+   equilibrium. The controller has to supply the restoring action itself; this is why the settling time
+   in the results below is measured in minutes.
+2. **The RHP zero** imposes a hard limit: any controller that demands a fast altitude response pays for
+   it with a large inverse (undershoot/overshoot) excursion. No amount of PID tuning removes it — it is
+   a property of the aircraft, not of the gains.
+
+## Design
+
+Two tuning iterations, both in `matlab/`. Gains were found by manual tuning plus automatic search in
+MATLAB, with the closed-loop poles checked at every step.
+
+| | Version 1 (`partc_pid_baseline.m`) | Version 2 (`partc_pid_improved.m`) |
+|---|---|---|
+| `Kp` | `-0.00022` | `-0.000300` |
+| `Ki` | `-3.5·10⁻⁶` | `-5.0·10⁻⁶` |
+| `Kd` | `-0.0018` | `-0.0017` |
+| Dominant closed-loop poles | `-0.0015 ± 1.2299i` | `-0.0061 ± 1.1969i` |
+| Remaining poles | `-1.0965`, `-0.1168`, `-0.0187`, `-0.0045` | `-1.0160`, `-0.1915`, `-0.0186`, `-0.0045` |
+
+All closed-loop poles have negative real parts in both versions, so the design is asymptotically
+stable. Version 2 moves the dominant pair further into the left half-plane, which is what cuts the
+settling time.
 
 ## Results
 
-Performance as reported in the project:
+Step command of `+100 m` in altitude, measured by `stepinfo` in MATLAB R2025a by running the scripts in
+this repository:
 
-| Method | Settling time | Overshoot | Undershoot | Steady-state error |
-|---|---|---|---|---|
-| Open loop | > 300 s | — | — | large |
-| PID | ~2100 s | ~0 % | — | ~0.01 % |
-| **LQI** | **1.13 s** | **1.5 %** | **12.6 %** | **0 %** |
+| Metric | Version 1 | Version 2 |
+|---|---|---|
+| Rise time | 1.017 s | 1.027 s |
+| Peak time | 3.28 s | 3.35 s |
+| Peak value | 1.85 | 1.91 |
+| **Settling time (2 %)** | **2401.8 s** (40 min) | **601.9 s** (10 min) |
+| Overshoot | 85.46 % | 90.85 % |
+| Undershoot | 0.81 % | 0.75 % |
+| Steady-state error | 0 | 0 |
+| Gain margin | — | 1.017 dB @ 1.20 rad/s |
+| Phase margin | — | 1.08° @ 1.19 rad/s |
 
-Closed-loop poles of the LQI system:
+The 4× improvement in settling time is the point of version 2. It does **not** come for free: overshoot
+grows from 85 % to 91 %, and the stability margins are razor thin — a phase margin of about 1° is
+effectively no robustness at all, so any change in the aircraft model would destabilise the loop.
 
-```
--8.04 ± 8.22i,  -2.94 ± 1.94i,  -0.0045
-```
+## Reading the result honestly
 
-All poles have negative real parts, so the closed loop is asymptotically stable. The pole at
-`-0.0045` is the shifted integrator pole — slow by design, and exactly what provides the integral
-action that removes the steady-state error. The pair at `-2.94 ± 1.94i` shapes the dominant transient,
-and `-8.04 ± 8.22i` is the fast pair that keeps the elevator response crisp.
+The two numbers that matter here are not the ones that look good.
 
-The undershoot of 12.6 % is worth noting: the altitude response initially moves away from the setpoint
-before the integrator pulls it back, so a real implementation would have to check that this excursion
-stays inside the altitude band the aircraft is allowed to fly.
+* **Settling time is not set by the oscillation.** The response peaks in 3.3 s but only settles after
+  10 minutes, because the tail is governed by the slow poles near the origin (`-0.0045` and `-0.0061`,
+  time constants of 160–220 s), not by the fast oscillatory pair. Shortening the settling time further
+  means moving those poles, which a single-loop PID on altitude cannot do — it has one measured signal.
+* **Overshoot near 90 % is structural.** With an RHP zero at `+5.6 rad/s`, aggressive altitude response
+  and small overshoot are mutually exclusive for this plant. Chasing the overshoot with the PID gains
+  trades directly against stability margin, which is exactly what the 1.08° phase margin shows.
+
+So the honest conclusion of Part C is: **a PID controller stabilises the altitude loop and gives zero
+steady-state error, but it cannot deliver a flyable response on this model** — the trade-off between
+speed, overshoot and robustness is exhausted. Fixing it requires a controller with more information,
+which is what the group's later LQI extension does: augmenting the plant with an integrator state and
+solving the optimal problem moves the design out of the PID trade-off entirely. That extension is
+included in `report/group_extension/` for comparison, but it is not my work.
 
 ## Repository contents
 
 ```
-boeing747-lqi-control/
+boeing747-altitude-hold/
+├─ matlab/
+│  ├─ partc_pid_baseline.m    # version 1: first PID tuning
+│  └─ partc_pid_improved.m    # version 2: improved tuning + margin analysis
 ├─ report/
-│  ├─ Part_C_LQI_Report.docx   # original report (Word)
-│  └─ Part_C_LQI_Report.pdf    # same report, rendered for reading in the browser
+│  ├─ Part_C_PID_Report.docx  # the report (Word)
+│  ├─ Part_C_PID_Report.pdf   # the same report, readable in the browser
+│  └─ group_extension/        # the group's LQI extension, for comparison
 └─ README.md
 ```
 
-The published copy of the report has the author's name and student identification number removed.
+The MATLAB listings were recovered from the appendix of the report and verified by running them; every
+number in the tables above is printed by `partc_pid_improved.m` / `partc_pid_baseline.m`. Personal
+identifiers (student number, class) were removed from the published report.
+
+## How to run
+
+Requires MATLAB with the Control System Toolbox.
+
+```matlab
+cd matlab
+partc_pid_improved      % prints poles, step metrics, gain and phase margins; plots step and Bode
+partc_pid_baseline      % version 1, for comparison
+```
+
+Both scripts build the plant from the state-space matrices, so they are standalone — nothing external to
+load.
+
+## Next steps I would take
+
+1. **Move the slow poles.** Either a cascade structure (inner pitch-rate or pitch-attitude loop feeding
+   the altitude loop) or an observer-based design, since a single altitude measurement cannot move four
+   slow poles.
+2. **Reclaim the margin.** Even keeping PID, robustness to the RHP zero improves with a rate-limited or
+   filtered reference, or with `pidtune` under an explicit phase-margin target rather than manual gain
+   search.
+3. **Test the model, not just the numbers.** Part D's turbulence and parameter-variation study is where
+   the 1.08° phase margin would show up as an unstable aircraft — which is the right reason to move to
+   LQI.
 
 ## Stack
 
-MATLAB · Control System Toolbox · Simulink · PID Tuner · LQR/LQI design
+MATLAB R2025a · Control System Toolbox (`ss2tf`, `tf`, `pid`, `feedback`, `pole`, `stepinfo`, `margin`)
