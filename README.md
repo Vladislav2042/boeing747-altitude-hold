@@ -12,6 +12,14 @@ both requirements at once.
 This repository contains the technical report (`.docx` and `.pdf`). The models and simulations live in
 MATLAB and were not part of the submission archive, so no source code is published here.
 
+## Scope of contribution
+
+Part C of a **group** course project (Group 3). My part was the control engineering itself: evaluating
+the PID baseline, then the LQR, then designing and tuning the LQI controller — the weighting matrices,
+gains, simulations, pole analysis and the comparison table below are the result of that work. The
+written report was assembled within the group from these results, and is published here with personal
+identifiers (name, student number) removed.
+
 ## The problem
 
 From Part A of the project, the longitudinal dynamics of the Boeing 747 give a **fourth-order**
@@ -97,7 +105,7 @@ boeing747-lqi-control/
 └─ README.md
 ```
 
-The student identification number has been removed from the published copy of the report.
+The published copy of the report has the author's name and student identification number removed.
 
 ## Stack
 
